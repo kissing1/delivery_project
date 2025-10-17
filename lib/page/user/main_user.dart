@@ -1,13 +1,16 @@
+import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter_application_1/config/config.dart';
 import 'package:flutter_application_1/model/requsts/address_list_post_req.dart';
 import 'package:flutter_application_1/model/requsts/delete_addresses_post_req.dart';
 import 'package:flutter_application_1/model/responses/delete_addresses_get_res.dart';
+import 'package:flutter_application_1/model/responses/receiver_by_get_res.dart';
 import 'package:flutter_application_1/page/login.dart';
 import 'package:flutter_application_1/page/user/AddAnAddressPage.dart';
 import 'package:flutter_application_1/page/user/add_items/Delivery_status.dart';
 import 'package:flutter_application_1/page/user/add_items/add_Delivery_work.dart';
+import 'package:flutter_application_1/page/user/detail_product.dart';
 import 'package:flutter_application_1/page/user/user_%20record.dart';
 import 'package:flutter_application_1/widgets/bottom_nav.dart';
 import 'package:http/http.dart' as http;
@@ -29,6 +32,7 @@ class _MainUserState extends State<MainUser>
   String? _apiBase;
   Map<String, dynamic>? _userData;
   Map<String, dynamic>? _addressList;
+  Timer? _waitCheckTimer;
 
   @override
   void initState() {
@@ -37,7 +41,80 @@ class _MainUserState extends State<MainUser>
       setState(() => _apiBase = (cfg['apiEndpoint'] as String?)?.trim());
       FetchUser(widget.userid);
       FetchAddresses(widget.userid);
+      _fetchWaitReceive(); // โหลดครั้งแรก
+      _startAutoCheck(); // ✅ เริ่มจับเวลาเช็คข้อมูล
     });
+  }
+
+  @override
+  void dispose() {
+    _waitCheckTimer?.cancel(); // ✅ ยกเลิก Timer ตอนออก
+    super.dispose();
+  }
+
+  void _startAutoCheck() {
+    _waitCheckTimer = Timer.periodic(const Duration(seconds: 10), (_) async {
+      await _checkForUpdates();
+    });
+  }
+
+  /// ✅ ฟังก์ชันนี้จะไม่ setState ถ้าข้อมูลไม่เปลี่ยน
+  Future<void> _checkForUpdates() async {
+    if (_apiBase == null) return;
+    try {
+      final url = Uri.parse(
+        "$_apiBase/deliveries/by-receiver/${widget.userid}",
+      );
+      final res = await http.get(url);
+
+      if (res.statusCode == 200) {
+        final parsed = byReceiverGetResFromJson(res.body);
+        // 🧠 เทียบข้อมูลเก่ากับใหม่
+        if (!_listEquals(parsed.items, _waitReceiveItems)) {
+          setState(() {
+            _waitReceiveItems = parsed.items;
+          });
+        }
+      }
+    } catch (e) {
+      debugPrint("❌ update check error: $e");
+    }
+  }
+
+  /// ✅ เช็คว่า list เปลี่ยนจริงไหม (compare id หรือจำนวนสินค้า)
+  bool _listEquals(List<Item> a, List<Item> b) {
+    if (a.length != b.length) return false;
+    for (int i = 0; i < a.length; i++) {
+      if (a[i].id != b[i].id || a[i].amount != b[i].amount) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  // ignore: unused_element
+  List<Item> _waitReceiveItems = [];
+  bool _waitLoading = false;
+
+  Future<void> _fetchWaitReceive() async {
+    if (_apiBase == null) return;
+    setState(() => _waitLoading = true);
+    try {
+      final url = Uri.parse(
+        "$_apiBase/deliveries/by-receiver/${widget.userid}",
+      );
+      final res = await http.get(url);
+      if (res.statusCode == 200) {
+        final parsed = byReceiverGetResFromJson(res.body);
+        setState(() {
+          _waitReceiveItems = parsed.items;
+        });
+      }
+    } catch (e) {
+      debugPrint("❌ fetch error: $e");
+    } finally {
+      setState(() => _waitLoading = false);
+    }
   }
 
   Future<void> FetchUser(int userid) async {
@@ -196,6 +273,19 @@ class _MainUserState extends State<MainUser>
   }
 
   Widget _buildWaitReceiveTab() {
+    if (_waitLoading) {
+      return const Center(child: CircularProgressIndicator());
+    }
+
+    if (_waitReceiveItems.isEmpty) {
+      return const Center(
+        child: Text(
+          "ยังไม่มีสินค้ารอรับ 📦",
+          style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+        ),
+      );
+    }
+
     return Column(
       children: [
         const SizedBox(height: 10),
@@ -204,12 +294,73 @@ class _MainUserState extends State<MainUser>
           style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
         ),
         Expanded(
-          child: ListView(
-            padding: const EdgeInsets.all(16),
-            children: [
-              _buildProductCard("IPhone 14 Pro max", 0),
-              _buildProductCard("IPhone 14", 1),
-            ],
+          child: RefreshIndicator(
+            onRefresh: _fetchWaitReceive,
+            child: ListView.builder(
+              padding: const EdgeInsets.all(16),
+              itemCount: _waitReceiveItems.length,
+              itemBuilder: (context, index) {
+                final item = _waitReceiveItems[index];
+
+                // ✅ แปลง base64 → MemoryImage
+                ImageProvider imageProvider;
+                if (item.pictureProduct.isNotEmpty) {
+                  try {
+                    final cleaned = item.pictureProduct.replaceAll(
+                      RegExp(r'^data:image/[^;]+;base64,'),
+                      '',
+                    );
+                    imageProvider = MemoryImage(base64Decode(cleaned));
+                  } catch (_) {
+                    imageProvider = const AssetImage(
+                      "assets/images/placeholder.png",
+                    );
+                  }
+                } else {
+                  imageProvider = const AssetImage(
+                    "assets/images/placeholder.png",
+                  );
+                }
+
+                return Card(
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  elevation: 4,
+                  shadowColor: Colors.green.withOpacity(0.2),
+                  margin: const EdgeInsets.only(bottom: 12),
+                  child: ListTile(
+                    leading: ClipRRect(
+                      borderRadius: BorderRadius.circular(8),
+                      child: Image(
+                        image: imageProvider,
+                        width: 50,
+                        height: 50,
+                        fit: BoxFit.cover,
+                      ),
+                    ),
+                    title: Text(item.nameProduct),
+                    subtitle: Text("จำนวน: ${item.amount}"),
+                    trailing: const Icon(
+                      Icons.chevron_right,
+                      color: Colors.grey,
+                    ),
+                    onTap: () {
+                      // 👉 กดเพื่อไปหน้า DetailProduct พร้อมส่ง deliveryId
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => DetailProduct(
+                            deliveryId: item.deliveryId,
+                            userid: widget.userid,
+                          ),
+                        ),
+                      );
+                    },
+                  ),
+                );
+              },
+            ),
           ),
         ),
       ],

@@ -20,6 +20,7 @@ class LocationRider extends StatefulWidget {
 class _LocationRiderState extends State<LocationRider> {
   final MapController _map = MapController();
   StreamSubscription<DocumentSnapshot>? _riderStream;
+  Timer? _checkTimer;
 
   LatLng? _rider;
   LatLng? _receiver;
@@ -31,15 +32,22 @@ class _LocationRiderState extends State<LocationRider> {
 
   bool _mapReady = false;
   bool _loading = true;
+  bool _popupShown = false;
 
   @override
   void initState() {
     super.initState();
     _fetchInitialPosition();
+
+    // 🕒 ตั้ง Timer เช็ก delivery_id ทุก 5 วิ
+    _checkTimer = Timer.periodic(const Duration(seconds: 5), (_) {
+      _checkIfDeliveryFinished();
+    });
   }
 
   @override
   void dispose() {
+    _checkTimer?.cancel();
     _riderStream?.cancel();
     super.dispose();
   }
@@ -54,7 +62,7 @@ class _LocationRiderState extends State<LocationRider> {
       if (res.statusCode == 200) {
         final data = overviewRiderGetResFromJson(res.body);
 
-        // ✅ เช็คว่า delivery_id เป็น null ไหม
+        // ✅ ถ้า delivery_id เป็น null ตอนเปิดหน้าครั้งแรก
         if (data.deliveryId == null) {
           _showDeliveryCompletePopup();
           return;
@@ -74,7 +82,27 @@ class _LocationRiderState extends State<LocationRider> {
     } catch (e) {
       debugPrint("❌ overview exception: $e");
     } finally {
-      setState(() => _loading = false);
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  /// 🕒 เช็กซ้ำว่ามีการ finish หรือยัง
+  Future<void> _checkIfDeliveryFinished() async {
+    if (_popupShown) return; // ✅ กัน popup เด้งซ้ำ
+    try {
+      final cfg = await Configuration.getConfig();
+      final baseUrl = cfg["apiEndpoint"];
+      final url = Uri.parse("$baseUrl/riders/overview/${widget.riderId}");
+
+      final res = await http.get(url);
+      if (res.statusCode == 200) {
+        final data = overviewRiderGetResFromJson(res.body);
+        if (data.deliveryId == null) {
+          _showDeliveryCompletePopup();
+        }
+      }
+    } catch (e) {
+      debugPrint("❌ checkIfDeliveryFinished exception: $e");
     }
   }
 
@@ -167,9 +195,11 @@ class _LocationRiderState extends State<LocationRider> {
     return (b * 180 / math.pi + 360) % 360;
   }
 
-  /// ✅ Popup แสดงว่า "ขนส่งเสร็จสิ้น"
+  /// ✅ Popup "ขนส่งเสร็จสิ้น"
   void _showDeliveryCompletePopup() {
-    if (!mounted) return;
+    if (!mounted || _popupShown) return;
+    _popupShown = true;
+
     final snackBar = SnackBar(
       duration: const Duration(seconds: 3),
       backgroundColor: Colors.green,
