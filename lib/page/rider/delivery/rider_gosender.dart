@@ -8,6 +8,7 @@ import 'package:flutter_application_1/config/config.dart';
 import 'package:flutter_application_1/model/responses/users_address_id_get_res.dart';
 import 'package:flutter_application_1/model/requsts/accep_status_update_req.dart'; // ← model req
 import 'package:flutter_application_1/model/responses/accep_status_update_res.dart'; // ← model res
+import 'package:flutter_application_1/page/rider/delivery/go_receive_item.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:latlong2/latlong.dart';
@@ -335,6 +336,8 @@ class _RiderGosenderState extends State<RiderGosender>
 
   // ===========================================================================
   // 2) ยิง API: /deliveries/update-status-accept  (แทน /deliveries/arrived)
+  // ===========================================================================
+  // 2) ยิง API: /deliveries/update-status-accept  (แทน /deliveries/arrived)
   Future<void> _submitAcceptUpdate() async {
     if (_apiBase == null || riderLatLng == null || _imageBase64 == null) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -345,11 +348,10 @@ class _RiderGosenderState extends State<RiderGosender>
 
     setState(() => _sending = true);
 
-    // เตรียม body จาก model ที่คุณมี
     final req = AccepStatusUpdateReq(
       deliveryId: widget.deliveryid,
       riderId: widget.riderId,
-      pictureStatus2: _imageBase64!, // ← base64
+      pictureStatus2: _imageBase64!,
       riderLat: riderLatLng!.latitude,
       riderLng: riderLatLng!.longitude,
     );
@@ -372,7 +374,6 @@ class _RiderGosenderState extends State<RiderGosender>
       if (!mounted) return;
 
       if (res.statusCode == 200) {
-        // แปลงผลลัพธ์กลับดูได้
         final parsed = accepStatusUpdateResFromJson(res.body);
         debugPrint("✅ update-status-accept OK -> ${parsed.message}");
 
@@ -382,7 +383,20 @@ class _RiderGosenderState extends State<RiderGosender>
             backgroundColor: Colors.green,
           ),
         );
-        Navigator.pop(context, true);
+
+        // ✅ ไปหน้า GoReceiveItem ทันที (แทนที่หน้านี้ไว้)
+        // หมายเหตุ: GoReceiveItem ใช้ชื่อพารามิเตอร์ deliveryId (I ใหญ่)
+        Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(
+            builder: (_) => GoReceiveItem(
+              addressId: widget.addressId, // ใช้เป็น fallback ถ้าต้องใช้
+              riderId: widget.riderId, // ไรเดอร์ที่กำลังไปส่ง
+              deliveryId: widget.deliveryid, // ชื่อ param ต้องเป็น deliveryId
+              // riderLocationId: widget.riderId, // (ถ้ามี) ส่งเพิ่มได้
+            ),
+          ),
+        );
       } else {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(

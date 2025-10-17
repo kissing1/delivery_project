@@ -116,7 +116,8 @@ class _DeliveryStatusPageState extends State<DeliveryStatusPage>
             ),
           ),
           Consumer<DeliveryProvider>(
-            builder: (_, p, __) => DoneWidget(deliveries: p.deliveries),
+            builder: (_, p, __) =>
+                DoneWidget(deliveries: p.deliveries, userid: widget.userid),
           ),
         ],
       ),
@@ -416,12 +417,28 @@ class _WaitingWidgetState extends State<WaitingWidget>
       );
 
       if (res.statusCode == 200) {
-        final data = jsonDecode(res.body);
-        final newList = List.from(data["deliveries"] ?? []);
+        // ✅ ป้องกัน error type 'Null'
+        if (res.body.isEmpty || res.body == 'null') {
+          debugPrint("⚠️ API ส่ง null/ว่าง");
+          if (mounted) {
+            setState(() {
+              _userDeliveries = [];
+              _isLoading = false;
+            });
+          }
+          return;
+        }
 
-        // ✅ อัปเดตเฉพาะเมื่อข้อมูลเปลี่ยนจริง
+        final decoded = jsonDecode(res.body);
+        if (decoded is! Map<String, dynamic>) {
+          debugPrint("⚠️ Response format ไม่ถูกต้อง: $decoded");
+          return;
+        }
+
+        final newList = List.from(decoded["deliveries"] ?? []);
         final oldJson = jsonEncode(_userDeliveries);
         final newJson = jsonEncode(newList);
+
         if (oldJson != newJson) {
           if (mounted) {
             setState(() {
@@ -552,28 +569,41 @@ class _ShippingWidgetState extends State<ShippingWidget>
 
   String? _apiBase;
   bool _loading = false;
-  List<senderlist.Delivery> _apiTransporting =
-      []; // จาก API (เฉพาะสถานะกำลังขนส่ง)
+  List<senderlist.Delivery> _apiTransporting = [];
+  String _lastJson = ""; // 🧠 เก็บ snapshot ล่าสุด
+  Timer? _refreshTimer;
 
   @override
   void initState() {
     super.initState();
     _initApiBaseAndMaybeFetch();
+
+    // 🔁 รีเฟรชทุก 10 วินาทีแบบไม่กระพริบ
+    _refreshTimer = Timer.periodic(const Duration(seconds: 10), (_) {
+      if (mounted && !_loading) {
+        _fetchTransportingFromApi();
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _refreshTimer?.cancel();
+    super.dispose();
   }
 
   Future<void> _initApiBaseAndMaybeFetch() async {
-    if (widget.userid == null) return; // ไม่ได้ต้องการยิง API ก็จบ
+    if (widget.userid == null) return;
     final cfg = await Configuration.getConfig();
     if (!mounted) return;
     setState(() => _apiBase = (cfg["apiEndpoint"] as String?)?.trim());
-    await _fetchTransportingFromApi(); // โหลดรอบแรก
+    await _fetchTransportingFromApi();
   }
 
   Future<void> _fetchTransportingFromApi() async {
-    if (_apiBase == null || widget.userid == null) return;
-    if (_loading) return;
+    if (_apiBase == null || widget.userid == null || _loading) return;
 
-    setState(() => _loading = true);
+    _loading = true;
     try {
       final res = await http.post(
         Uri.parse("$_apiBase/delivery/list-by-user"),
@@ -582,6 +612,14 @@ class _ShippingWidgetState extends State<ShippingWidget>
       );
 
       if (res.statusCode == 200) {
+        if (res.body.isEmpty || res.body == 'null') {
+          debugPrint("⚠️ list-by-user ส่ง null/empty");
+          if (mounted && _apiTransporting.isNotEmpty) {
+            setState(() => _apiTransporting = []);
+          }
+          return;
+        }
+
         final parsed = senderlist.byListSenderGetResFromJson(res.body);
 
         bool isTransporting(String? s) {
@@ -593,8 +631,22 @@ class _ShippingWidgetState extends State<ShippingWidget>
             .where((d) => isTransporting(d.status))
             .toList();
 
+        // 🧠 เปรียบเทียบข้อมูลใหม่กับ snapshot เก่า
+        final newJson = jsonEncode(
+          onlyTransporting.map((e) => e.toJson()).toList(),
+        );
+        if (newJson == _lastJson) {
+          debugPrint("ℹ️ ไม่มีการเปลี่ยนแปลงของข้อมูล shipping");
+          return; // ❌ ไม่ setState → ไม่กระพริบ
+        }
+
+        debugPrint("✅ ข้อมูล shipping มีการเปลี่ยนแปลง → อัปเดต UI");
+
         if (mounted) {
-          setState(() => _apiTransporting = onlyTransporting);
+          setState(() {
+            _apiTransporting = onlyTransporting;
+            _lastJson = newJson;
+          });
         }
       } else {
         debugPrint("❌ list-by-user error ${res.statusCode}: ${res.body}");
@@ -602,11 +654,11 @@ class _ShippingWidgetState extends State<ShippingWidget>
     } catch (e) {
       debugPrint("❌ list-by-user exception: $e");
     } finally {
-      if (mounted) setState(() => _loading = false);
+      _loading = false;
     }
   }
 
-  // ---------- helpers: อ่านและรวมค่าจากหลายชนิด (Map / model ของคุณ / model API) ----------
+  // ---------- helpers ----------
   String _stripHeader(String raw) =>
       raw.replaceAll(RegExp(r'^data:image/[^;]+;base64,'), '').trim();
 
@@ -614,7 +666,7 @@ class _ShippingWidgetState extends State<ShippingWidget>
     try {
       if (d is Map && d["delivery_id"] != null) return "m:${d["delivery_id"]}";
       if (d is senderlist.Delivery) return "a:${d.deliveryId}";
-      final did = (d.deliveryId ?? d.id ?? "").toString(); // ของ Provider
+      final did = (d.deliveryId ?? d.id ?? "").toString();
       return "p:$did";
     } catch (_) {
       return d.hashCode.toString();
@@ -639,7 +691,6 @@ class _ShippingWidgetState extends State<ShippingWidget>
     return d.amount ?? 0;
   }
 
-  // รูปสินค้าหลัก (picture_product)
   String _pictureProductB64(dynamic d) {
     final raw = (d is Map)
         ? (d["picture_product"] ?? "").toString()
@@ -649,14 +700,12 @@ class _ShippingWidgetState extends State<ShippingWidget>
     return _stripHeader(raw);
   }
 
-  // proof: คืน base64 (ตัด header) หรือ null ถ้าไม่มี/ว่าง
   String? _proofB64(String? s) {
     if (s == null) return null;
     final b64 = _stripHeader(s);
     return b64.isEmpty ? null : b64;
   }
 
-  // UI helpers
   Widget _placeholderBox({
     double w = 120,
     double h = 120,
@@ -702,7 +751,6 @@ class _ShippingWidgetState extends State<ShippingWidget>
     }
   }
 
-  // Row ของรูป proof (เอาเฉพาะจาก Delivery.proof)
   Widget _buildProofRow(senderlist.Delivery d) {
     final pic2 = _proofB64(d.proof.pictureStatus2);
     final pic3 = _proofB64(d.proof.pictureStatus3);
@@ -717,13 +765,11 @@ class _ShippingWidgetState extends State<ShippingWidget>
   Widget build(BuildContext context) {
     super.build(context);
 
-    // จาก Provider → คัดเฉพาะสถานะกำลังขนส่ง
     final providerShipping = widget.deliveries.where((it) {
       final s = _statusOfAny(it).toLowerCase().trim();
       return s == 'transporting' || s == 'shipping';
     }).toList();
 
-    // รวมของ API + Provider (กันซ้ำด้วย key)
     final combined = <dynamic>[];
     final seen = <String>{};
     void addUnique(dynamic item) {
@@ -778,7 +824,6 @@ class _ShippingWidgetState extends State<ShippingWidget>
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  // แถวข้อมูลหลัก (รูปสินค้า + ข้อมูล)
                   Row(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
@@ -811,11 +856,9 @@ class _ShippingWidgetState extends State<ShippingWidget>
                     ],
                   ),
 
-                  // เส้นคั่นเล็กๆ
                   const SizedBox(height: 12),
                   const Divider(height: 1),
 
-                  // รายละเอียดของผู้จัดส่ง + proof (เฉพาะโมเดลจาก API เท่านั้นที่มี field proof)
                   if (isApiModel) ...[
                     const SizedBox(height: 12),
                     Row(
@@ -901,6 +944,12 @@ class _DoneWidgetState extends State<DoneWidget>
       );
 
       if (res.statusCode == 200) {
+        if (res.body.isEmpty || res.body == 'null') {
+          debugPrint("⚠️ list-by-user ส่ง null/empty");
+          if (mounted) setState(() => _apiDone = []);
+          return;
+        }
+
         final parsed = senderlist.byListSenderGetResFromJson(res.body);
         final onlyDone = parsed.deliveries
             .where((d) => _isFinishedStr(d.status))
@@ -921,7 +970,7 @@ class _DoneWidgetState extends State<DoneWidget>
     try {
       if (d is Map && d["delivery_id"] != null) return "m:${d["delivery_id"]}";
       if (d is senderlist.Delivery) return "a:${d.deliveryId}";
-      final did = (d.deliveryId ?? d.id ?? "").toString(); // ของ Provider
+      final did = (d.deliveryId ?? d.id ?? "").toString();
       return "p:$did";
     } catch (_) {
       return d.hashCode.toString();
@@ -949,7 +998,6 @@ class _DoneWidgetState extends State<DoneWidget>
   String _stripHeader(String raw) =>
       raw.replaceAll(RegExp(r'^data:image/[^;]+;base64,'), '').trim();
 
-  // รูปสินค้า
   String _pictureProductB64(dynamic d) {
     final raw = (d is Map)
         ? (d["picture_product"] ?? "").toString()
@@ -959,7 +1007,6 @@ class _DoneWidgetState extends State<DoneWidget>
     return _stripHeader(raw);
   }
 
-  // proof: picture_status2 (เอาจาก proof ก่อน ถ้าไม่มีค่อยไล่ใน assignments)
   String? _pictureStatus2B64(senderlist.Delivery d) {
     String? candidate = d.proof.pictureStatus2;
     candidate ??= d.assignments
@@ -970,7 +1017,6 @@ class _DoneWidgetState extends State<DoneWidget>
     return _stripHeader(candidate);
   }
 
-  // proof + assignments → picture_status3 (unique list)
   List<String> _pictureStatus3ListB64(senderlist.Delivery d) {
     final set = <String>{};
     void addIf(String? s) {
@@ -1033,12 +1079,10 @@ class _DoneWidgetState extends State<DoneWidget>
   Widget build(BuildContext context) {
     super.build(context);
 
-    // จาก Provider: คัดเฉพาะ finish
     final providerDone = widget.deliveries
         .where((it) => _isFinishedStr(_statusOfAny(it)))
         .toList();
 
-    // รวม API + Provider แบบกันซ้ำ
     final combined = <dynamic>[];
     final seen = <String>{};
     void addUnique(dynamic item) {
@@ -1134,11 +1178,9 @@ class _DoneWidgetState extends State<DoneWidget>
                     ],
                   ),
 
-                  // เส้นคั่น
                   const SizedBox(height: 12),
                   const Divider(height: 1),
 
-                  // รายละเอียดผู้จัดส่ง + รูป proof
                   if (isApiModel) ...[
                     const SizedBox(height: 12),
                     Row(
@@ -1155,34 +1197,47 @@ class _DoneWidgetState extends State<DoneWidget>
                       ],
                     ),
                     const SizedBox(height: 8),
-                    // picture_status2 (ใหญ่)
-                    pic2 != null
-                        ? _b64ImageBox(pic2, w: 120, h: 120)
-                        : _placeholderBox(w: 120, h: 120),
-                    const SizedBox(height: 12),
-                    // picture_status3 (แนวนอน)
-                    if (pics3.isNotEmpty)
-                      SingleChildScrollView(
-                        scrollDirection: Axis.horizontal,
-                        child: Row(
+                    // 🧭 เรียงรูป picture_status2 และ picture_status3 เป็น Row
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        // ✅ รูปซ้าย (picture_status2)
+                        Column(
                           children: [
-                            for (final b64 in pics3) ...[
-                              _b64ImageBox(b64, w: 72, h: 72),
-                              const SizedBox(width: 8),
-                            ],
+                            pic2 != null
+                                ? _b64ImageBox(pic2, w: 120, h: 120)
+                                : _placeholderBox(w: 120, h: 120),
+                            const SizedBox(height: 4),
+                            const Text(
+                              "รูปตอนรับของ",
+                              style: TextStyle(
+                                fontSize: 12,
+                                fontFamily: "Poppins",
+                              ),
+                            ),
                           ],
                         ),
-                      )
-                    else
-                      Row(
-                        children: [
-                          _placeholderBox(),
-                          const SizedBox(width: 8),
-                          _placeholderBox(),
-                          const SizedBox(width: 8),
-                          _placeholderBox(),
-                        ],
-                      ),
+
+                        const SizedBox(width: 12),
+
+                        // ✅ รูปขวา (picture_status3 — เอาแค่รูปแรก ถ้ามีหลายรูป)
+                        Column(
+                          children: [
+                            (pics3.isNotEmpty)
+                                ? _b64ImageBox(pics3.first, w: 120, h: 120)
+                                : _placeholderBox(w: 120, h: 120),
+                            const SizedBox(height: 4),
+                            const Text(
+                              "รูปตอนส่งของเสร็จสิ้น",
+                              style: TextStyle(
+                                fontSize: 12,
+                                fontFamily: "Poppins",
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
                   ],
                 ],
               ),
