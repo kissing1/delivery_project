@@ -6,6 +6,7 @@ import 'package:flutter_application_1/model/requsts/Deliveryadd_create_post_req.
 import 'package:flutter_application_1/model/responses/Deliveryadd_create_post_res.dart';
 import 'package:flutter_application_1/model/responses/by_list_sender_get_res.dart'
     as senderlist;
+import 'package:flutter_application_1/page/user/add_items/rider_detail.dart';
 import 'package:provider/provider.dart';
 import 'package:flutter_application_1/providers/delivery_provider.dart';
 import 'package:flutter_application_1/page/user/add_items/delivery_detail_page.dart';
@@ -552,6 +553,8 @@ class _WaitingWidgetState extends State<WaitingWidget>
 
 /// ─────────────────────────────────────────────────────────────────────────
 /// 🟠 Widget “กำลังขนส่ง”
+/// ─────────────────────────────────────────────────────────────────────────
+/// 🟠 Widget “กำลังขนส่ง”
 class ShippingWidget extends StatefulWidget {
   final List deliveries; // จาก Provider (อาจเป็น model ของคุณหรือ Map)
   final int? userid; // ถ้าส่ง userid มาจะยิง API list-by-user เพิ่ม
@@ -631,13 +634,12 @@ class _ShippingWidgetState extends State<ShippingWidget>
             .where((d) => isTransporting(d.status))
             .toList();
 
-        // 🧠 เปรียบเทียบข้อมูลใหม่กับ snapshot เก่า
         final newJson = jsonEncode(
           onlyTransporting.map((e) => e.toJson()).toList(),
         );
         if (newJson == _lastJson) {
           debugPrint("ℹ️ ไม่มีการเปลี่ยนแปลงของข้อมูล shipping");
-          return; // ❌ ไม่ setState → ไม่กระพริบ
+          return;
         }
 
         debugPrint("✅ ข้อมูล shipping มีการเปลี่ยนแปลง → อัปเดต UI");
@@ -755,10 +757,34 @@ class _ShippingWidgetState extends State<ShippingWidget>
     final pic2 = _proofB64(d.proof.pictureStatus2);
     final pic3 = _proofB64(d.proof.pictureStatus3);
 
-    Widget item(String? b64) =>
-        b64 != null ? _b64ImageBox(b64) : _placeholderBox();
+    Widget item(String? b64, String label) {
+      return Column(
+        children: [
+          b64 != null
+              ? _b64ImageBox(b64, w: 120, h: 120)
+              : _placeholderBox(w: 120, h: 120),
+          const SizedBox(height: 4),
+          Text(
+            label,
+            style: const TextStyle(
+              fontSize: 12,
+              fontFamily: "Poppins",
+              color: Colors.black87,
+            ),
+            textAlign: TextAlign.center,
+          ),
+        ],
+      );
+    }
 
-    return Row(children: [item(pic2), const SizedBox(width: 16), item(pic3)]);
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        item(pic2, "รูปตอนรับของ"),
+        const SizedBox(width: 16),
+        item(pic3, "รูปตอนส่งของเสร็จสิ้น"),
+      ],
+    );
   }
 
   @override
@@ -812,77 +838,107 @@ class _ShippingWidgetState extends State<ShippingWidget>
           final prodB64 = _pictureProductB64(d);
           final hasProdPic = prodB64.isNotEmpty;
 
-          return Card(
-            elevation: 3,
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(12),
-              side: const BorderSide(color: Colors.black12),
-            ),
-            margin: const EdgeInsets.symmetric(vertical: 8),
-            child: Padding(
-              padding: const EdgeInsets.all(12),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      hasProdPic
-                          ? _b64ImageBox(prodB64, w: 60, h: 60)
-                          : const Icon(
-                              Icons.local_shipping,
-                              size: 60,
-                              color: Colors.green,
-                            ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              name,
-                              style: const TextStyle(
-                                fontSize: 15,
-                                fontWeight: FontWeight.bold,
-                                fontFamily: "Poppins",
-                              ),
-                            ),
-                            const SizedBox(height: 4),
-                            Text("สถานะ: $status"),
-                            Text("จำนวน: $amount"),
-                          ],
-                        ),
+          return GestureDetector(
+            onTap: () {
+              if (isApiModel) {
+                // ignore: unnecessary_cast
+                final delivery = d as senderlist.Delivery;
+                final int? riderId = (delivery.assignments.isNotEmpty)
+                    ? delivery.assignments.first.riderId
+                    : null;
+                final deliveryId = delivery.deliveryId;
+
+                if (riderId != null) {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => RiderDetail(
+                        riderId: riderId,
+                        deliveryId: deliveryId,
+                        userid: widget.userid,
                       ),
-                    ],
-                  ),
-
-                  const SizedBox(height: 12),
-                  const Divider(height: 1),
-
-                  if (isApiModel) ...[
-                    const SizedBox(height: 12),
+                    ),
+                  );
+                } else {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text("ยังไม่มีไรเดอร์รับงานนี้"),
+                      backgroundColor: Colors.orange,
+                    ),
+                  );
+                }
+              }
+            },
+            child: Card(
+              elevation: 3,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+                side: const BorderSide(color: Colors.black12),
+              ),
+              margin: const EdgeInsets.symmetric(vertical: 8),
+              child: Padding(
+                padding: const EdgeInsets.all(12),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
                     Row(
-                      children: const [
-                        Text(
-                          "รายละเอียดของผู้จัดส่ง",
-                          style: TextStyle(
-                            fontWeight: FontWeight.bold,
-                            fontFamily: "Poppins",
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        hasProdPic
+                            ? _b64ImageBox(prodB64, w: 60, h: 60)
+                            : const Icon(
+                                Icons.local_shipping,
+                                size: 60,
+                                color: Colors.green,
+                              ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                name,
+                                style: const TextStyle(
+                                  fontSize: 15,
+                                  fontWeight: FontWeight.bold,
+                                  fontFamily: "Poppins",
+                                ),
+                              ),
+                              const SizedBox(height: 4),
+                              Text("สถานะ: $status"),
+                              Text("จำนวน: $amount"),
+                            ],
                           ),
-                        ),
-                        SizedBox(width: 6),
-                        Icon(
-                          Icons.chevron_right,
-                          color: Colors.orange,
-                          size: 18,
                         ),
                       ],
                     ),
-                    const SizedBox(height: 8),
-                    // ignore: unnecessary_cast
-                    _buildProofRow(d as senderlist.Delivery),
+                    const SizedBox(height: 12),
+                    const Divider(height: 1),
+                    if (isApiModel) ...[
+                      const SizedBox(height: 12),
+                      Row(
+                        children: const [
+                          Text(
+                            "รายละเอียดของผู้จัดส่ง",
+                            style: TextStyle(
+                              fontWeight: FontWeight.bold,
+                              fontFamily: "Poppins",
+                            ),
+                          ),
+                          SizedBox(width: 6),
+                          Icon(
+                            Icons.chevron_right,
+                            color: Colors.orange,
+                            size: 18,
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 8),
+                      // ignore: unnecessary_cast
+                      _buildProofRow(d as senderlist.Delivery),
+                    ],
                   ],
-                ],
+                ),
               ),
             ),
           );

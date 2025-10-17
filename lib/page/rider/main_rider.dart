@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter_application_1/config/config.dart';
@@ -22,7 +23,10 @@ class _MainRiderState extends State<MainRider> {
   Map<String, dynamic>? _riderData;
   List<WaitingDeliveriesGetRes> waitingList = [];
   Map<int, String> receiverNames = {};
+  String _lastJson = "";
+  Timer? _refreshTimer;
 
+  @override
   @override
   void initState() {
     super.initState();
@@ -31,11 +35,22 @@ class _MainRiderState extends State<MainRider> {
           setState(() => _apiBase = (cfg['apiEndpoint'] as String?)?.trim());
           fetchRider(widget.riderid);
           deliverieswaiting();
+
+          // ⏳ รีเฟรชทุก 10 วิ
+          _refreshTimer = Timer.periodic(const Duration(seconds: 10), (_) {
+            deliverieswaiting();
+          });
         })
         .catchError((e) {
           debugPrint("อ่าน config ไม่ได้: $e");
           return null;
         });
+  }
+
+  @override
+  void dispose() {
+    _refreshTimer?.cancel();
+    super.dispose();
   }
 
   Future<void> fetchRider(int userid) async {
@@ -59,9 +74,21 @@ class _MainRiderState extends State<MainRider> {
     final res = await http.get(url);
     if (res.statusCode == 200) {
       final data = waitingDeliveriesGetResFromJson(res.body);
+
+      // 🧠 เปรียบเทียบข้อมูลใหม่กับ snapshot เดิม
+      final newJson = jsonEncode(data.map((e) => e.toJson()).toList());
+      if (newJson == _lastJson) {
+        debugPrint("ℹ️ waiting deliveries ไม่มีการเปลี่ยนแปลง");
+        return; // ❌ ข้าม setState → ไม่กระพริบ
+      }
+
+      debugPrint("✅ waiting deliveries มีการเปลี่ยนแปลง → อัปเดต UI");
+
       setState(() {
         waitingList = data;
+        _lastJson = newJson;
       });
+
       for (var d in data) {
         fetchReceiverName(d.userIdReceiver);
       }
