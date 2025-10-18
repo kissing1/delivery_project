@@ -1,9 +1,10 @@
 import 'dart:convert';
 import 'dart:developer';
 import 'package:flutter/material.dart';
-import 'package:flutter_application_1/page/gps_get.dart';
+
 import 'package:flutter_application_1/page/rider/main_rider.dart';
 import 'package:flutter_application_1/page/rider/registher_rider.dart';
+import 'package:flutter_application_1/page/tools/qr_install_page.dart';
 import 'package:flutter_application_1/page/user/register_user.dart';
 import 'package:http/http.dart' as http;
 
@@ -26,6 +27,25 @@ class _LoginPageState extends State<LoginPage> {
 
   String? _apiBase;
   bool _loading = false;
+
+  bool _openingQr = false;
+  static const String _apkUrl =
+      'https://your-host/zapgo-v1.0.0.apk'; // <- ใส่ลิงก์จริง
+
+  void _openZapGoDownload() {
+    if (_openingQr) return; // กันกดรัว
+    if (_apkUrl.isEmpty) {
+      _showErrorDialog("ขออภัย", "ยังไม่มีลิงก์ดาวน์โหลดแอป");
+      return;
+    }
+    setState(() => _openingQr = true);
+    Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => const QRInstallPage(apkUrl: _apkUrl)),
+    ).then((_) {
+      if (mounted) setState(() => _openingQr = false);
+    });
+  }
 
   @override
   void initState() {
@@ -388,21 +408,28 @@ class _LoginPageState extends State<LoginPage> {
                                 ),
                               ),
                             ),
-                            TextButton(
-                              onPressed: () {
-                                Navigator.of(context).push(
-                                  MaterialPageRoute(
-                                    builder: (_) =>
-                                        const RiderLocationRealtime(),
+                            TextButton.icon(
+                              onPressed: _openingQr ? null : _openZapGoDownload,
+                              icon: const Icon(Icons.qr_code_2, size: 18),
+                              label: ConstrainedBox(
+                                constraints: const BoxConstraints(
+                                  maxWidth: 130,
+                                ), // กันข้อความล้นจอเล็ก
+                                child: const FittedBox(
+                                  fit: BoxFit.scaleDown,
+                                  child: Text(
+                                    "",
+                                    // สั้น กระชับ และไม่ล้น (ย่ออัตโนมัติหากพื้นที่ไม่พอ)
+                                    style: TextStyle(
+                                      fontSize: 14,
+                                      decoration: TextDecoration.underline,
+                                    ),
                                   ),
-                                );
-                              },
-                              child: const Text(
-                                "GPS",
-                                style: TextStyle(
-                                  fontSize: 14,
-                                  decoration: TextDecoration.underline,
                                 ),
+                              ),
+                              style: TextButton.styleFrom(
+                                foregroundColor:
+                                    Colors.green.shade700, // โทน ZapGo
                               ),
                             ),
                           ],

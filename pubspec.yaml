@@ -47,10 +47,22 @@ dependencies:
   cloud_firestore: ^6.0.2
   firebase_database: ^12.0.3
   firebase_auth: ^6.1.1
+  flutter_launcher_icons: ^0.14.4
+  qr_flutter: ^4.1.0
+  share_plus: ^12.0.0
 
 dev_dependencies:
   flutter_test:
     sdk: flutter
+flutter_launcher_icons:
+  android: true
+  ios: true
+  image_path: assets/images/img_1_cropped.png # ใช้ไฟล์ใน assets/images ตามที่ต้องการ
+
+  # (แนะนำสำหรับ Android 8+ ให้ไอคอนสวยเป็น Adaptive Icon)
+  android_adaptive_icon:
+    foreground: assets/images/img_1_cropped.png # ควรเป็นรูปโปร่งหลัง/เวกเตอร์ถ้ามี
+    background: "#2ECC71" # หรือใส่รูป background ก็ได้
 
   # The "flutter_lints" package below contains a set of recommended lints to
   # encourage good coding practices. The lint set provided by the package is

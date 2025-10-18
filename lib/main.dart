@@ -1,6 +1,6 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter_application_1/page/login.dart';
+import 'package:flutter_application_1/page/splash/animated_splash.dart';
 import 'package:flutter_application_1/providers/delivery_provider.dart';
 import 'package:provider/provider.dart';
 import 'package:firebase_core/firebase_core.dart'; // ✅ เพิ่มอันนี้
@@ -37,7 +37,7 @@ class MyApp extends StatelessWidget {
         colorScheme: ColorScheme.fromSeed(seedColor: const Color(0xFF32BD6C)),
         useMaterial3: true,
       ),
-      home: const LoginPage(),
+      home: const AnimatedSplash(userIdSender: 0), // ← เดิมเป็น LoginPage
     );
   }
 }

@@ -64,6 +64,8 @@ class DetailDeliveryGetRes {
         addressReceiver: Address.fromJson(json["address_receiver"]),
       );
 
+  String get nameReceiver => '';
+
   Map<String, dynamic> toJson() => {
     "id": id,
     "delivery_id": deliveryId,
